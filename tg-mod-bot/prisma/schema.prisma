@@ -1,0 +1,465 @@
+// ==========================================================
+// PRISMA SXEMA — Telegram Moderatsiya Boti
+// PostgreSQL + Prisma ORM
+// ==========================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================================
+// GURUH (har bir Telegram guruhi uchun bitta yozuv)
+// ==========================================================
+model Group {
+  id         String  @id @default(cuid())
+  telegramId BigInt  @unique
+  title      String?
+  username   String?
+  isActive   Boolean @default(true)
+
+  // Guruhda botning javob tili: "uz" | "ru" | "en" (standart: "uz")
+  language String @default("uz")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 1:1 munosabatlar (guruh sozlamalari)
+  filterSettings  FilterSettings?
+  warningSettings WarningSettings?
+  spamSettings    SpamSettings?
+  reportSettings  ReportSettings?
+  rule            Rule?
+
+  // 1:many munosabatlar
+  admins                  Admin[]
+  warnings                Warning[]
+  mutedUsers              MutedUser[]
+  bannedUsers             BannedUser[]
+  reports                 Report[]
+  whitelistUsers          WhitelistUser[]
+  blacklistUsers          BlacklistUser[]
+  dailyStatistics         DailyStatistics[]
+  spamLogs                SpamLog[]
+  deletedMessageCounters  DeletedMessageCounter[]
+  requiredChannels        RequiredChannel[]
+  badWords                BadWord[]
+  memberEvents            MemberEvent[]
+
+  @@map("groups")
+}
+
+// ==========================================================
+// ADMINLAR (guruh administratorlari keshi)
+// ==========================================================
+model Admin {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId   BigInt
+  isOwner  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, userId])
+  @@map("admins")
+}
+
+// ==========================================================
+// FILTR SOZLAMALARI (Moderatsiya bo'limi)
+// ==========================================================
+model FilterSettings {
+  id      String @id @default(cuid())
+  groupId String @unique
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  linkFilter      Boolean @default(false)
+  badWordsFilter  Boolean @default(true)
+
+  apkFilter  Boolean @default(true)
+  zipFilter  Boolean @default(true)
+  exeFilter  Boolean @default(true)
+  rarFilter  Boolean @default(true)
+  xapkFilter Boolean @default(true)
+  apkmFilter Boolean @default(true)
+
+  floodProtection Boolean @default(true)
+  antiSpam        Boolean @default(true)
+  antiForward     Boolean @default(false)
+  emojiSpamFilter Boolean @default(true)
+  capsFilter      Boolean @default(true)
+  adFilter        Boolean @default(false)
+
+  // Majburiy (talab qilinadigan) kanallarni tekshirishni yoqish/o'chirish
+  requiredChannelsEnabled Boolean @default(false)
+
+  emojiLimit       Int @default(5)
+  capsPercentLimit Int @default(70)
+
+  // Yangi qo'shilgan foydalanuvchi uchun captcha (bot emasligini tasdiqlash)
+  captchaEnabled Boolean @default(false)
+
+  // Reyd (qisqa vaqtda ko'p a'zo kirishi) himoyasi
+  antiRaidEnabled       Boolean @default(false)
+  antiRaidThreshold     Int     @default(10)
+  antiRaidWindowSeconds Int     @default(30)
+
+  // Slow mode: foydalanuvchi necha soniyada bir marta yozishi mumkin (0 — o'chirilgan)
+  slowModeSeconds Int @default(0)
+
+  // Sticker/GIF spami va bir xil xabarni takroran yuborish filtrlari
+  stickerSpamFilter   Boolean @default(false)
+  duplicateSpamFilter Boolean @default(false)
+
+  // Kirdi/chiqdi xizmat xabarlarini avtomatik o'chirish
+  deleteServiceMessages Boolean @default(false)
+
+  // Moderatsiya harakatlari yuboriladigan log-kanal (ixtiyoriy)
+  logChannelId BigInt?
+
+  updatedAt DateTime @updatedAt
+
+  @@map("filter_settings")
+}
+
+// ==========================================================
+// OGOHLANTIRISH SOZLAMALARI
+// ==========================================================
+model WarningSettings {
+  id      String @id @default(cuid())
+  groupId String @unique
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  // Nechta ogohlantirishdan keyin avtomatik ban: 1,2,3,4,5,10
+  maxWarnings Int @default(3)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("warning_settings")
+}
+
+// ==========================================================
+// SPAM SOZLAMALARI (Flood/Spam himoyasi)
+// ==========================================================
+model SpamSettings {
+  id      String @id @default(cuid())
+  groupId String @unique
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  // Xabarlar soni: 3,5,10,20
+  messageLimit Int @default(5)
+  // Vaqt oynasi (soniya): 5,10,20
+  timeWindowSeconds Int @default(10)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("spam_settings")
+}
+
+// ==========================================================
+// OGOHLANTIRISHLAR JURNALI
+// ==========================================================
+model Warning {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId  BigInt
+  count   Int    @default(1)
+  reason  String?
+  adminId BigInt?
+
+  createdAt DateTime @default(now())
+
+  @@index([groupId, userId])
+  @@map("warnings")
+}
+
+// ==========================================================
+// OVOZDAN MAHRUM QILINGANLAR (MUTED)
+// ==========================================================
+model MutedUser {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId     BigInt
+  mutedUntil DateTime?
+  reason     String?
+  adminId    BigInt?
+  isActive   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([groupId, userId])
+  @@map("muted_users")
+}
+
+// ==========================================================
+// BLOKLANGANLAR (BANNED)
+// ==========================================================
+model BannedUser {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId      BigInt
+  reason      String?
+  adminId     BigInt?
+  bannedUntil DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, userId])
+  @@map("banned_users")
+}
+
+// ==========================================================
+// SHIKOYATLAR (REPORTS)
+// ==========================================================
+model Report {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  reporterId     BigInt
+  reportedUserId BigInt
+  messageId      BigInt?
+  status         ReportStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, reporterId, reportedUserId])
+  @@index([groupId, reportedUserId])
+  @@map("reports")
+}
+
+enum ReportStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+// ==========================================================
+// SHIKOYAT LIMIT SOZLAMALARI
+// ==========================================================
+model ReportSettings {
+  id      String @id @default(cuid())
+  groupId String @unique
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  // 5,10,20,50,100
+  limit Int @default(10)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("report_settings")
+}
+
+// ==========================================================
+// OQ RO'YXAT (WHITELIST)
+// ==========================================================
+model WhitelistUser {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId BigInt
+
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, userId])
+  @@map("whitelist_users")
+}
+
+// ==========================================================
+// QORA RO'YXAT (BLACKLIST)
+// ==========================================================
+model BlacklistUser {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId BigInt
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, userId])
+  @@map("blacklist_users")
+}
+
+// ==========================================================
+// QOIDALAR
+// ==========================================================
+model Rule {
+  id      String @id @default(cuid())
+  groupId String @unique
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  content String @default("")
+
+  updatedAt DateTime @updatedAt
+
+  @@map("rules")
+}
+
+// ==========================================================
+// KUNLIK STATISTIKA
+// ==========================================================
+model DailyStatistics {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  date DateTime @db.Date
+
+  deletedMessages Int @default(0)
+  warningsGiven   Int @default(0)
+  bansGiven       Int @default(0)
+  mutesGiven      Int @default(0)
+  spamDetected    Int @default(0)
+  reportsReceived Int @default(0)
+  linksDeleted    Int @default(0)
+  filesDeleted    Int @default(0)
+
+  @@unique([groupId, date])
+  @@map("daily_statistics")
+}
+
+// ==========================================================
+// SPAM JURNALLARI
+// ==========================================================
+model SpamLog {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId            BigInt
+  messageCount      Int
+  timeWindowSeconds Int
+
+  createdAt DateTime @default(now())
+
+  @@index([groupId, userId])
+  @@map("spam_logs")
+}
+
+// ==========================================================
+// O'CHIRILGAN XABARLAR HISOBLAGICHI (foydalanuvchi bo'yicha)
+// ==========================================================
+model DeletedMessageCounter {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId BigInt
+  count  Int    @default(0)
+  reason String?
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([groupId, userId])
+  @@map("deleted_message_counters")
+}
+
+// ==========================================================
+// TALAB QILINADIGAN (MAJBURIY) KANALLAR
+// ==========================================================
+model RequiredChannel {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  channelId       BigInt
+  channelUsername String?
+  channelTitle    String?
+  inviteLink      String?
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, channelId])
+  @@map("required_channels")
+}
+
+// ==========================================================
+// YOMON SO'ZLAR (har bir guruh uchun alohida ro'yxat)
+// ==========================================================
+model BadWord {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  word String
+
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, word])
+  @@map("bad_words")
+}
+
+// ==========================================================
+// A'ZOLAR HARAKATI (kirdi/chiqdi) — 1 kun/hafta/oy statistikasi
+// va reyd (anti-raid) aniqlash uchun jurnal
+// ==========================================================
+model MemberEvent {
+  id      String @id @default(cuid())
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId BigInt
+  type   MemberEventType
+
+  createdAt DateTime @default(now())
+
+  @@index([groupId, type, createdAt])
+  @@map("member_events")
+}
+
+enum MemberEventType {
+  JOIN
+  LEAVE
+}
+
+// ==========================================================
+// BOT FOYDALANUVCHILARI (botga shaxsiy chatda /start bosgan har bir kishi)
+// Umumiy xabar yuborish (broadcast) va statistika uchun ishlatiladi.
+// ==========================================================
+model BotUser {
+  id         String  @id @default(cuid())
+  telegramId BigInt  @unique
+  username   String?
+  firstName  String?
+  isActive   Boolean @default(true)
+
+  // Shaxsiy chatdagi til: "uz" | "ru" | "en" (standart: "uz")
+  language String @default("uz")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("bot_users")
+}
+
+// ==========================================================
+// UMUMIY MAJBURIY OBUNA KANALLARI (bot egasi /admin panelidan boshqaradi)
+// Botdan foydalanish (shaxsiy chatda) uchun ushbu kanallarga a'zolik talab qilinadi.
+// ==========================================================
+model GlobalRequiredChannel {
+  id              String  @id @default(cuid())
+  channelId       BigInt  @unique
+  channelUsername String?
+  channelTitle    String?
+  inviteLink      String?
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@map("global_required_channels")
+}
